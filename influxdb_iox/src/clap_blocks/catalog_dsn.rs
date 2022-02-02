@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use iox_catalog::{
+    create_or_get_default_records,
     interface::{Catalog, Error},
+    mem::MemCatalog,
     postgres::PostgresCatalog,
 };
 
@@ -15,10 +17,18 @@ pub struct CatalogDsnConfig {
 
 impl CatalogDsnConfig {
     pub async fn get_catalog(&self, app_name: &'static str) -> Result<Arc<dyn Catalog>, Error> {
-        let catalog = Arc::new(
-            PostgresCatalog::connect(app_name, iox_catalog::postgres::SCHEMA_NAME, &self.dsn)
-                .await?,
-        );
+        // If the connection string value is "mem", use an in-memory catalog. Intended for
+        // internal testing.
+        let catalog = if self.dsn == "mem" {
+            let mem = MemCatalog::new();
+            create_or_get_default_records(2, &mem).await.unwrap();
+            Arc::new(mem) as Arc<dyn Catalog>
+        } else {
+            Arc::new(
+                PostgresCatalog::connect(app_name, iox_catalog::postgres::SCHEMA_NAME, &self.dsn)
+                    .await?,
+            ) as Arc<dyn Catalog>
+        };
 
         Ok(catalog)
     }
