@@ -6,9 +6,11 @@ edition = "2021"
 
 [dependencies]
 arrow = { version = "8.0", features = ["prettyprint"] }
+arrow-flight = "8.0"
 arrow_util = { path = "../arrow_util" }
 base64 = "0.13"
 bytes = "1.0"
+client_util = { path = "../client_util" }
 datafusion = { path = "../datafusion" }
 data_types = { path = "../data_types" }
 futures = "0.3"
@@ -28,11 +30,13 @@ observability_deps = { path = "../observability_deps" }
 predicate = { path = "../predicate" }
 prost = "0.9"
 query = { path = "../query" }
+rand = "0.8.3"
 schema = { path = "../schema" }
 snafu = "0.7"
 thiserror = "1.0"
 time = { path = "../time" }
 tokio = { version = "1.13", features = ["macros", "parking_lot", "rt-multi-thread", "sync", "time"] }
+tonic = { version = "0.6" }
 uuid = { version = "0.8", features = ["v4"] }
 workspace-hack = { path = "../workspace-hack"}
 write_buffer = { path = "../write_buffer" }

@@ -245,6 +245,11 @@ impl ServerFixture {
         influxdb_iox_client::flight::Client::new(self.grpc_channel())
     }
 
+    /// Return a flight client suitable for communicating with the ingester service
+    pub fn ingester_flight_client(&self) -> ingester::flight::Client {
+        ingester::flight::Client::new(self.grpc_channel())
+    }
+
     /// Return a storage API client suitable for communicating with this
     /// server
     pub fn storage_client(&self) -> generated_types::storage_client::StorageClient<Connection> {
@@ -344,6 +349,7 @@ struct TestServer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServerType {
     Database,
+    Ingester,
     Router,
 }
 
@@ -482,6 +488,7 @@ impl TestServer {
 
         let type_name = match server_type {
             ServerType::Database => "database",
+            ServerType::Ingester => "ingester",
             ServerType::Router => "router",
         };
 
