@@ -633,8 +633,14 @@ impl TestServer {
         let mut interval = tokio::time::interval(Duration::from_millis(1000));
 
         loop {
-            match self.grpc_channel().await {
-                Ok(channel) => {
+            match (self.grpc_channel().await, self.test_config.server_type) {
+                (Ok(_channel), ServerType::Ingester) => {
+                    // TODO: What should be checked to ensure the ingester is up? Should
+                    // ingester implement the deployment service?
+                    println!("ingester grpc connected");
+                    return;
+                }
+                (Ok(channel), _) => {
                     println!("Successfully connected to server");
 
                     let mut health = influxdb_iox_client::health::Client::new(channel);
@@ -648,11 +654,11 @@ impl TestServer {
                             println!("Deployment service is not running");
                         }
                         Err(e) => {
-                            println!("Waiting for gRPC API to be up: {}", e);
+                            println!("Waiting for gRPC API to be healthy: {:?}", e);
                         }
                     }
                 }
-                Err(e) => {
+                (Err(e), _) => {
                     println!("Waiting for gRPC API to be up: {}", e);
                 }
             }
