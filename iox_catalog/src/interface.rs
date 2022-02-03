@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use influxdb_line_protocol::FieldValue;
 use schema::{InfluxColumnType, InfluxFieldType};
 use snafu::{OptionExt, Snafu};
-use sqlx::{Execute, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::{collections::BTreeMap, fmt::Debug};
@@ -466,11 +466,12 @@ pub trait TombstoneRepo: Send + Sync {
 /// Functions for working with parquet file pointers in the catalog
 #[async_trait]
 pub trait ParquetFileRepo: Send + Sync {
-
     /// create the parquet file
     #[allow(clippy::too_many_arguments)]
     async fn create(
         &self,
+        // this transaction is only provided when this record is inserted in a transaction
+        txt: Option<&mut Transaction<'_, Postgres>>,
         sequencer_id: SequencerId,
         table_id: TableId,
         partition_id: PartitionId,
@@ -480,23 +481,6 @@ pub trait ParquetFileRepo: Send + Sync {
         min_time: Timestamp,
         max_time: Timestamp,
     ) -> Result<ParquetFile>;
-
-
-    /// create the parquet file
-    #[allow(clippy::too_many_arguments)]
-    async fn create_in_transaction(
-        &self,
-        txt: &mut Transaction<'_, Postgres>,
-        sequencer_id: SequencerId,
-        table_id: TableId,
-        partition_id: PartitionId,
-        object_store_id: Uuid,
-        min_sequence_number: SequenceNumber,
-        max_sequence_number: SequenceNumber,
-        min_time: Timestamp,
-        max_time: Timestamp,
-    ) -> Result<ParquetFile>;
-
 
     /// Flag the parquet file for deletion
     async fn flag_for_delete(&self, id: ParquetFileId) -> Result<()>;
@@ -510,6 +494,12 @@ pub trait ParquetFileRepo: Send + Sync {
         sequencer_id: SequencerId,
         sequence_number: SequenceNumber,
     ) -> Result<Vec<ParquetFile>>;
+
+    /// Verify if the parquet file exists by selecting its id
+    async fn exist(&self, id: ParquetFileId) -> Result<bool>;
+
+    /// Return count
+    async fn count(&self) -> Result<usize>;
 }
 
 /// Functions for working with processed tombstone pointers in the catalog
@@ -518,10 +508,20 @@ pub trait ProcessedTombstoneRepo: Send + Sync {
     /// create processed tombstones
     async fn create_many(
         &self,
-        txt: &mut Option<Transaction<'_, Postgres>>,
+        txt: Option<&mut Transaction<'_, Postgres>>,
         parquet_file_id: ParquetFileId,
         tombstones: &[Tombstone],
     ) -> Result<Vec<ProcessedTombstone>>;
+
+    /// Verify if a processed tombstone exists in the catalog
+    async fn exist(
+        &self,
+        parquet_file_id: ParquetFileId,
+        tombstone_id: TombstoneId,
+    ) -> Result<bool>;
+
+    /// Return count
+    async fn count(&self) -> Result<usize>;
 }
 
 /// Data object for a kafka topic
@@ -1346,6 +1346,7 @@ pub(crate) mod test_helpers {
         let parquet_repo = catalog.parquet_files();
         let parquet_file = parquet_repo
             .create(
+                None,
                 sequencer.id,
                 partition.table_id,
                 partition.id,
@@ -1361,6 +1362,7 @@ pub(crate) mod test_helpers {
         // verify that trying to create a file with the same UUID throws an error
         let err = parquet_repo
             .create(
+                None,
                 sequencer.id,
                 partition.table_id,
                 partition.id,
@@ -1376,6 +1378,7 @@ pub(crate) mod test_helpers {
 
         let other_file = parquet_repo
             .create(
+                None,
                 sequencer.id,
                 other_partition.table_id,
                 other_partition.id,
