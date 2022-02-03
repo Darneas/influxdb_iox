@@ -10,7 +10,6 @@ use crate::interface::{
     TombstoneId, TombstoneRepo,
 };
 use async_trait::async_trait;
-use observability_deps::tracing::warn;
 use sqlx::{Postgres, Transaction};
 use std::convert::TryFrom;
 use std::fmt::Formatter;
@@ -28,6 +27,15 @@ impl MemCatalog {
     /// return new initialized `MemCatalog`
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // Since this is test catalog that do not handle transaction
+    // this is a help function to fake `rollback` work
+    fn remove_parquet_file(&self, object_store_id: Uuid) {
+        let mut collections = self.collections.lock().expect("mutex poisoned");
+        collections
+            .parquet_files
+            .retain(|f| f.object_store_id != object_store_id);
     }
 }
 
@@ -104,7 +112,9 @@ impl Catalog for MemCatalog {
         parquet_file: &ParquetFile,
         tombstones: &[Tombstone],
     ) -> Result<(ParquetFile, Vec<ProcessedTombstone>), Error> {
-        // create a parquet file in the catalog first
+        // The activities in this file must either be all succeed or all fail
+
+        // Create a parquet file in the catalog first
         let parquet = self
             .parquet_files()
             .create(
@@ -124,7 +134,15 @@ impl Catalog for MemCatalog {
         let processed_tombstones = self
             .processed_tombstones()
             .create_many(None, parquet.id, tombstones)
-            .await?;
+            .await;
+
+        if let Err(error) = processed_tombstones {
+            // failed to insert processed tombstone, remove the above
+            // inserted parquet file from the catalog
+            self.remove_parquet_file(parquet.object_store_id);
+            return Err(error);
+        }
+        let processed_tombstones = processed_tombstones.unwrap();
 
         Ok((parquet, processed_tombstones))
     }
@@ -566,12 +584,10 @@ impl ProcessedTombstoneRepo for MemCatalog {
                 .any(|pt| pt.tombstone_id == tombstone.id && pt.parquet_file_id == parquet_file_id)
             {
                 // The tombstone was already proccessed for this file
-                warn!(
-                    tombstone_id = tombstone.id.get(),
-                    parquet_file_id = parquet_file_id.get(),
-                    "The processed tombstone already exists"
-                );
-                continue;
+                return Err(Error::ProcessTombstoneExists {
+                    parquet_file_id: parquet_file_id.get(),
+                    tombstone_id: tombstone.id.get(),
+                });
             }
 
             let processed_tombstone = ProcessedTombstone {
@@ -579,10 +595,11 @@ impl ProcessedTombstoneRepo for MemCatalog {
                 parquet_file_id,
             };
             processed_tombstones.push(processed_tombstone);
-
-            collections.processed_tombstones.push(processed_tombstone);
         }
 
+        collections
+            .processed_tombstones
+            .append(&mut processed_tombstones);
         Ok(processed_tombstones)
     }
 

@@ -160,10 +160,13 @@ impl Catalog for PostgresCatalog {
         let processed_tombstones = match processed_tombstones {
             Ok(processed_tombstones) => processed_tombstones,
             Err(e) => {
-                // The create_many function only returns error when the txt does not provide to it
-                // which should not happen here. Just show the error
-                warn!("{}", e.to_string());
-                vec![]
+                // Error while adding processed tombstones
+                warn!(
+                    "Error while adding processed tombstone: {}. Transaction stops.",
+                    e.to_string()
+                );
+                let _rollback = txt.rollback().await;
+                return Err(e);
             }
         };
 
@@ -663,7 +666,7 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
         let mut processed_tombstones = vec![];
 
         for tombstone in tombstones {
-            let rec = sqlx::query_as::<_, ProcessedTombstone>(
+            let processed_tombstone = sqlx::query_as::<_, ProcessedTombstone>(
                 r#"
                 INSERT INTO processed_tombstone ( tombstone_id, parquet_file_id )
                 VALUES ( $1, $2 )
@@ -685,20 +688,9 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
                 } else {
                     Error::SqlxError { source: e }
                 }
-            });
+            })?;
 
-            if let Err(error) = rec {
-                // The insert fails due to some issue, issue warning and continue to insert others
-                warn!(
-                    tombstone_id = tombstone.id.get(),
-                    parquet_file_id = parquet_file_id.get(),
-                    "{}",
-                    error.to_string()
-                );
-            } else {
-                let processed_tombstone = rec.unwrap();
-                processed_tombstones.push(processed_tombstone);
-            }
+            processed_tombstones.push(processed_tombstone);
         }
 
         Ok(processed_tombstones)
