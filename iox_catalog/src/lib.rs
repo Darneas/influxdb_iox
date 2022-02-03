@@ -43,7 +43,7 @@ pub async fn validate_or_insert_schema<'a, T, U>(
     catalog: &dyn Catalog,
 ) -> Result<Option<NamespaceSchema>>
 where
-    T: IntoIterator<IntoIter = U, Item = (&'a String, &'a MutableBatch)> + Send + Sync,
+    T: IntoIterator<IntoIter = U, Item = (&'a str, &'a MutableBatch)> + Send + Sync,
     U: Iterator<Item = T::Item> + Send,
 {
     let tables = tables.into_iter();
@@ -237,7 +237,7 @@ mod tests {
                             let (writes, _) = mutable_batch_lp::lines_to_batches_stats(lp.as_str(), 42)
                                 .expect("failed to build test writes from LP");
 
-                            let got = validate_or_insert_schema(writes.iter(), &schema, &repo)
+                            let got = validate_or_insert_schema(writes.iter().map(|(k, v)| (k.as_str(), v)), &schema, &repo)
                                 .await;
 
                             match got {
@@ -259,8 +259,7 @@ mod tests {
                     // cached schema.
                     let db_schema = get_schema_by_name(NAMESPACE_NAME, &repo)
                         .await
-                        .expect("database failed to query for namespace schema")
-                        .expect("no schema found");
+                        .expect("database failed to query for namespace schema");
                     assert_eq!(schema, db_schema, "schema in DB and cached schema differ");
 
                     // Generate the map of tables => desired column types

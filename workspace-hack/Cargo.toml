@@ -66,7 +66,6 @@ base64 = { version = "0.13", features = ["std"] }
 bitflags = { version = "1" }
 byteorder = { version = "1", features = ["std"] }
 bytes = { version = "1", features = ["std"] }
-cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 digest = { version = "0.9", default-features = false, features = ["alloc", "std"] }
 either = { version = "1", features = ["use_std"] }
 futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
@@ -99,6 +98,7 @@ uuid = { version = "0.8", features = ["getrandom", "std", "v4"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
+cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -115,10 +115,10 @@ libc = { version = "0.2", features = ["extra_traits", "std"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
 scopeguard = { version = "1", features = ["use_std"] }
-winapi = { version = "0.3", default-features = false, features = ["basetsd", "cfg", "consoleapi", "errhandlingapi", "evntrace", "fileapi", "handleapi", "impl-debug", "impl-default", "in6addr", "inaddr", "ioapiset", "knownfolders", "libloaderapi", "lmcons", "minschannel", "minwinbase", "minwindef", "mstcpip", "mswsock", "namedpipeapi", "ntdef", "ntsecapi", "ntstatus", "objbase", "processenv", "schannel", "securitybaseapi", "shellapi", "shlobj", "sspi", "std", "stringapiset", "synchapi", "sysinfoapi", "threadpoollegacyapiset", "timezoneapi", "winbase", "wincon", "wincrypt", "windef", "winerror", "winioctl", "winnt", "winreg", "winsock2", "winuser", "ws2def", "ws2ipdef", "ws2tcpip", "wtypesbase"] }
+winapi = { version = "0.3", default-features = false, features = ["basetsd", "cfg", "consoleapi", "errhandlingapi", "evntrace", "fileapi", "handleapi", "impl-debug", "impl-default", "in6addr", "inaddr", "ioapiset", "knownfolders", "libloaderapi", "lmcons", "minschannel", "minwinbase", "minwindef", "mstcpip", "mswsock", "namedpipeapi", "ntdef", "ntsecapi", "ntstatus", "objbase", "processenv", "schannel", "securitybaseapi", "shellapi", "shlobj", "sspi", "std", "stringapiset", "synchapi", "sysinfoapi", "threadpoollegacyapiset", "timezoneapi", "winbase", "wincon", "wincrypt", "windef", "winerror", "winioctl", "winnt", "winreg", "winsock2", "winuser", "ws2def", "ws2ipdef", "ws2tcpip"] }
 
 [target.x86_64-pc-windows-msvc.build-dependencies]
 scopeguard = { version = "1", features = ["use_std"] }
-winapi = { version = "0.3", default-features = false, features = ["basetsd", "cfg", "consoleapi", "errhandlingapi", "evntrace", "fileapi", "handleapi", "impl-debug", "impl-default", "in6addr", "inaddr", "ioapiset", "knownfolders", "libloaderapi", "lmcons", "minschannel", "minwinbase", "minwindef", "mstcpip", "mswsock", "namedpipeapi", "ntdef", "ntsecapi", "ntstatus", "objbase", "processenv", "schannel", "securitybaseapi", "shellapi", "shlobj", "sspi", "std", "stringapiset", "synchapi", "sysinfoapi", "threadpoollegacyapiset", "timezoneapi", "winbase", "wincon", "wincrypt", "windef", "winerror", "winioctl", "winnt", "winreg", "winsock2", "winuser", "ws2def", "ws2ipdef", "ws2tcpip", "wtypesbase"] }
+winapi = { version = "0.3", default-features = false, features = ["basetsd", "cfg", "consoleapi", "errhandlingapi", "evntrace", "fileapi", "handleapi", "impl-debug", "impl-default", "in6addr", "inaddr", "ioapiset", "knownfolders", "libloaderapi", "lmcons", "minschannel", "minwinbase", "minwindef", "mstcpip", "mswsock", "namedpipeapi", "ntdef", "ntsecapi", "ntstatus", "objbase", "processenv", "schannel", "securitybaseapi", "shellapi", "shlobj", "sspi", "std", "stringapiset", "synchapi", "sysinfoapi", "threadpoollegacyapiset", "timezoneapi", "winbase", "wincon", "wincrypt", "windef", "winerror", "winioctl", "winnt", "winreg", "winsock2", "winuser", "ws2def", "ws2ipdef", "ws2tcpip"] }
 
 ### END HAKARI SECTION

@@ -3,7 +3,9 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use crate::{
-    clap_blocks::{run_config::RunConfig, write_buffer::WriteBufferConfig},
+    clap_blocks::{
+        catalog_dsn::CatalogDsnConfig, run_config::RunConfig, write_buffer::WriteBufferConfig,
+    },
     influxdb_ioxd::{
         self,
         server_type::{
@@ -14,7 +16,8 @@ use crate::{
 };
 use observability_deps::tracing::*;
 use router2::{
-    dml_handlers::ShardedWriteBuffer,
+    dml_handlers::{SchemaValidator, ShardedWriteBuffer},
+    namespace_cache::MemoryNamespaceCache,
     sequencer::Sequencer,
     server::{http::HttpDelegate, RouterServer},
     sharder::TableNamespaceSharder,
@@ -30,6 +33,9 @@ pub enum Error {
 
     #[error("Invalid config: {0}")]
     InvalidConfig(#[from] CommonServerStateError),
+
+    #[error("Catalog error: {0}")]
+    Catalog(#[from] iox_catalog::interface::Error),
 
     #[error("failed to initialise write buffer connection: {0}")]
     WriteBuffer(#[from] WriteBufferError),
@@ -57,12 +63,17 @@ pub struct Config {
     pub(crate) run_config: RunConfig,
 
     #[clap(flatten)]
+    pub(crate) catalog_dsn: CatalogDsnConfig,
+
+    #[clap(flatten)]
     pub(crate) write_buffer_config: WriteBufferConfig,
 }
 
 pub async fn command(config: Config) -> Result<()> {
     let common_state = CommonServerState::from_config(config.run_config.clone())?;
     let metrics = Arc::new(metric::Registry::default());
+
+    let catalog = config.catalog_dsn.get_catalog("router2").await?;
 
     let write_buffer = init_write_buffer(
         &config,
@@ -71,7 +82,10 @@ pub async fn command(config: Config) -> Result<()> {
     )
     .await?;
 
-    let http = HttpDelegate::new(config.run_config.max_http_request_size, write_buffer);
+    let ns_cache = Arc::new(MemoryNamespaceCache::default());
+    let handler_stack = SchemaValidator::new(write_buffer, catalog, ns_cache);
+
+    let http = HttpDelegate::new(config.run_config.max_http_request_size, handler_stack);
     let router_server = RouterServer::new(
         http,
         Default::default(),

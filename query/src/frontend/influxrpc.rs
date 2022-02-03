@@ -9,10 +9,9 @@ use data_types::chunk_metadata::ChunkId;
 use datafusion::{
     error::{DataFusionError, Result as DatafusionResult},
     logical_plan::{
-        binary_expr, lit, when, DFSchema, DFSchemaRef, Expr, ExprRewriter, LogicalPlan,
+        binary_expr, col, lit, when, DFSchema, DFSchemaRef, Expr, ExprRewriter, LogicalPlan,
         LogicalPlanBuilder,
     },
-    prelude::col,
     scalar::ScalarValue,
 };
 use datafusion_util::AsExpr;
@@ -225,7 +224,7 @@ impl InfluxRpcPlanner {
         // Mapping between table and chunks that need full plan
         let mut full_plan_table_chunks = BTreeMap::new();
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         for (table_name, predicate) in &table_predicates {
             // Identify which chunks can answer from its metadata and then record its table,
             // and which chunks needs full plan and group them into their table
@@ -332,7 +331,7 @@ impl InfluxRpcPlanner {
         let mut need_full_plans = BTreeMap::new();
         let mut known_columns = BTreeSet::new();
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         for (table_name, predicate) in &table_predicates {
             for chunk in database.chunks(table_name, predicate) {
                 // If there are delete predicates, we need to scan (or do full plan) the data to eliminate
@@ -462,7 +461,7 @@ impl InfluxRpcPlanner {
         let mut need_full_plans = BTreeMap::new();
         let mut known_values = BTreeSet::new();
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         for (table_name, predicate) in &table_predicates {
             for chunk in database.chunks(table_name, predicate) {
                 // If there are delete predicates, we need to scan (or do full plan) the data to eliminate
@@ -624,7 +623,7 @@ impl InfluxRpcPlanner {
         // The executor then figures out which columns have non-null
         // values and stops the plan executing once it has them
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         let mut field_list_plan = FieldListPlan::with_capacity(table_predicates.len());
 
         for (table_name, predicate) in &table_predicates {
@@ -675,7 +674,7 @@ impl InfluxRpcPlanner {
     {
         debug!(?rpc_predicate, "planning read_filter");
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         let mut ss_plans = Vec::with_capacity(table_predicates.len());
         for (table_name, predicate) in &table_predicates {
             let chunks = database.chunks(table_name, predicate);
@@ -731,7 +730,7 @@ impl InfluxRpcPlanner {
     {
         debug!(?rpc_predicate, ?agg, "planning read_group");
 
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         let mut ss_plans = Vec::with_capacity(table_predicates.len());
 
         for (table_name, predicate) in &table_predicates {
@@ -793,7 +792,7 @@ impl InfluxRpcPlanner {
         );
 
         // group tables by chunk, pruning if possible
-        let table_predicates = rpc_predicate.table_predicates(|| database.table_names());
+        let table_predicates = rpc_predicate.table_predicates(database);
         let mut ss_plans = Vec::with_capacity(table_predicates.len());
         for (table_name, predicate) in &table_predicates {
             let chunks = database.chunks(table_name, predicate);
@@ -1835,7 +1834,13 @@ impl<'a> ExprRewriter for MissingColumnsToNull<'a> {
 #[cfg(test)]
 mod tests {
     use datafusion::logical_plan::lit;
+    use predicate::predicate::PredicateBuilder;
     use schema::builder::SchemaBuilder;
+
+    use crate::{
+        exec::Executor,
+        test::{TestChunk, TestDatabase},
+    };
 
     use super::*;
 
@@ -1943,6 +1948,131 @@ mod tests {
             &rewritten_expr, expected,
             "Mismatch rewriting\nInput: {}\nRewritten: {}\nExpected: {}",
             expr, rewritten_expr, expected
+        );
+    }
+
+    #[tokio::test]
+    async fn test_predicate_rewrite_table_names() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            InfluxRpcPlanner::new()
+                .table_names(test_db, rpc_predicate)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_rewrite_tag_keys() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            InfluxRpcPlanner::new()
+                .tag_keys(test_db, rpc_predicate)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_rewrite_tag_values() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            InfluxRpcPlanner::new()
+                .tag_values(test_db, "foo", rpc_predicate)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_rewrite_field_columns() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            InfluxRpcPlanner::new()
+                .field_columns(test_db, rpc_predicate)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_rewrite_read_filter() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            InfluxRpcPlanner::new()
+                .read_filter(test_db, rpc_predicate)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_read_group() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            let agg = Aggregate::None;
+            let group_columns = &["foo"];
+            InfluxRpcPlanner::new()
+                .read_group(test_db, rpc_predicate, agg, group_columns)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_predicate_read_window_aggregate() {
+        run_test::<_, TestDatabase>(|test_db, rpc_predicate| {
+            let agg = Aggregate::First;
+            let every = WindowDuration::from_months(1, false);
+            let offset = WindowDuration::from_months(1, false);
+            InfluxRpcPlanner::new()
+                .read_window_aggregate(test_db, rpc_predicate, agg, every, offset)
+                .expect("creating plan");
+        })
+        .await
+    }
+
+    /// Runs func() and checks that predicates are simplified prior to sending them off
+    async fn run_test<F, D>(f: F)
+    where
+        F: FnOnce(&TestDatabase, InfluxRpcPredicate) + Send,
+    {
+        let chunk0 = Arc::new(
+            TestChunk::new("h2o")
+                .with_id(0)
+                .with_tag_column("foo")
+                .with_time_column(),
+        );
+
+        // this is what happens with a grpc predicate on a tag
+        //
+        // tag(foo) = 'bar' becomes
+        //
+        // CASE WHEN foo IS NULL then '' ELSE foo END = 'bar'
+        //
+        // It is critical to be rewritten foo = 'bar' correctly so
+        // that it can be evaluated quickly
+        let expr = when(col("foo").is_null(), lit(""))
+            .otherwise(col("foo"))
+            .unwrap();
+        let silly_predicate = PredicateBuilder::new()
+            .add_expr(expr.eq(lit("bar")))
+            .build();
+
+        let executor = Arc::new(Executor::new(1));
+        let test_db = TestDatabase::new(Arc::clone(&executor));
+        test_db.add_chunk("my_partition_key", Arc::clone(&chunk0));
+
+        let rpc_predicate = InfluxRpcPredicate::new(None, silly_predicate);
+
+        // run the function
+        f(&test_db, rpc_predicate);
+
+        let actual_predicate = test_db.get_chunks_predicate();
+
+        // verify that the predicate was rewritten to `foo = 'bar'`
+        let expr = col("foo").eq(lit("bar"));
+
+        let expected_predicate = PredicateBuilder::new().add_expr(expr).build();
+
+        assert_eq!(
+            actual_predicate, expected_predicate,
+            "\nActual: {:?}\nExpected: {:?}",
+            actual_predicate, expected_predicate
         );
     }
 }

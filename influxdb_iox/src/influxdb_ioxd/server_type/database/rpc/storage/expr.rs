@@ -8,6 +8,8 @@
 use std::collections::BTreeSet;
 use std::{convert::TryFrom, fmt};
 
+use datafusion::error::DataFusionError;
+use datafusion::logical_plan::when;
 use datafusion::{
     logical_plan::{binary_expr, Expr, Operator},
     prelude::*,
@@ -106,6 +108,12 @@ pub enum Error {
 
     #[snafu(display("Error converting field_name to utf8: {}", source))]
     ConvertingFieldName { source: std::string::FromUtf8Error },
+
+    #[snafu(display("Internal error creating CASE from tag_ref '{}: {}", tag_name, source))]
+    InternalCaseConversion {
+        tag_name: String,
+        source: DataFusionError,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -293,6 +301,7 @@ fn convert_simple_node(
     mut builder: InfluxRpcPredicateBuilder,
     node: RPCNode,
 ) -> Result<InfluxRpcPredicateBuilder> {
+    // Attempt to identify OR lists
     if let Ok(in_list) = InList::try_from(&node) {
         let InList { lhs, value_list } = in_list;
 
@@ -333,7 +342,7 @@ fn flatten_ands(node: RPCNode, mut dst: Vec<RPCNode>) -> Result<Vec<RPCNode>> {
 
 // Represents a predicate like <expr> IN (option1, option2, option3, ....)
 //
-// use `try_from_node1 to convert a tree like as ((expr = option1) OR (expr =
+// use `try_from_node` to convert a tree like as ((expr = option1) OR (expr =
 // option2)) or (expr = option3)) ... into such a form
 #[derive(Debug)]
 struct InList {
@@ -493,10 +502,35 @@ fn build_node(value: RPCValue, inputs: Vec<Expr>) -> Result<Expr> {
         RPCValue::UintValue(v) => Ok(lit(v)),
         RPCValue::FloatValue(f) => Ok(lit(f)),
         RPCValue::RegexValue(pattern) => Ok(lit(pattern)),
-        RPCValue::TagRefValue(tag_name) => Ok(col(&make_tag_name(tag_name)?)),
+        RPCValue::TagRefValue(tag_name) => build_tag_ref(tag_name),
         RPCValue::FieldRefValue(field_name) => Ok(col(&field_name)),
         RPCValue::Logical(logical) => build_logical_node(logical, inputs),
         RPCValue::Comparison(comparison) => build_comparison_node(comparison, inputs),
+    }
+}
+
+/// Converts InfluxRPC nodes like `TagRef(tag_name)`:
+///
+/// Special tags (_measurement, _field) -> reference to those names
+///
+/// Other tags
+///
+/// ```sql
+/// CASE
+///  WHEN tag_name IS NULL THEN ''
+///  ELSE tag_name
+/// ```
+///
+/// As storage predicates such as `TagRef(tag_name) = ''` expect to
+/// match missing tags which IOx stores as NULL
+fn build_tag_ref(tag_name: Vec<u8>) -> Result<Expr> {
+    let tag_name = make_tag_name(tag_name)?;
+
+    match tag_name.as_str() {
+        MEASUREMENT_COLUMN_NAME | FIELD_COLUMN_NAME => Ok(col(&tag_name)),
+        _ => when(col(&tag_name).is_null(), lit(""))
+            .otherwise(col(&tag_name))
+            .context(InternalCaseConversionSnafu { tag_name }),
     }
 }
 
@@ -833,13 +867,34 @@ fn format_comparison(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 #[cfg(test)]
 mod tests {
     use generated_types::node::Type as RPCNodeType;
-    use predicate::predicate::Predicate;
-    use std::collections::BTreeSet;
+    use predicate::{predicate::Predicate, rpc_predicate::QueryDatabaseMeta};
+    use std::{collections::BTreeSet, sync::Arc};
 
     use super::*;
 
+    struct Tables {
+        table_names: Vec<String>,
+    }
+
+    impl Tables {
+        fn new(table_names: &[&str]) -> Self {
+            let table_names = table_names.iter().map(|s| s.to_string()).collect();
+            Self { table_names }
+        }
+    }
+
+    impl QueryDatabaseMeta for Tables {
+        fn table_names(&self) -> Vec<String> {
+            self.table_names.clone()
+        }
+
+        fn table_schema(&self, _table_name: &str) -> Option<Arc<schema::Schema>> {
+            None
+        }
+    }
+
     fn table_predicate(predicate: InfluxRpcPredicate) -> Predicate {
-        let predicates = predicate.table_predicates(|| std::iter::once("foo".to_string()));
+        let predicates = predicate.table_predicates(&Tables::new(&["foo"]));
         assert_eq!(predicates.len(), 1);
         predicates.into_iter().next().unwrap().1
     }
@@ -929,14 +984,14 @@ mod tests {
             .expect("successfully converting predicate")
             .build();
 
-        let tables = ["foo", "bar"];
+        let tables = Tables::new(&["foo", "bar"]);
 
-        let table_predicates =
-            predicate.table_predicates(|| tables.iter().map(ToString::to_string));
+        let table_predicates = predicate.table_predicates(&tables);
         assert_eq!(table_predicates.len(), 2);
 
-        for (expected_table, (table, predicate)) in tables.iter().zip(table_predicates) {
-            assert_eq!(*expected_table, &table);
+        for (expected_table, (table, predicate)) in tables.table_names.iter().zip(table_predicates)
+        {
+            assert_eq!(expected_table, &table);
 
             let expected_exprs = vec![lit(table).not_eq(lit("foo"))];
 
