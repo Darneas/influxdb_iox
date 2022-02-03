@@ -12,7 +12,7 @@ use crate::{
         },
     },
 };
-use data_types::write_buffer::WriteBufferConnection;
+use data_types::write_buffer::{WriteBufferConnection, WriteBufferCreationConfig};
 use ingester::{
     handler::IngestHandlerImpl,
     server::{grpc::GrpcDelegate, http::HttpDelegate, IngesterServer},
@@ -20,9 +20,7 @@ use ingester::{
 use iox_catalog::interface::KafkaPartition;
 use object_store::ObjectStore;
 use observability_deps::tracing::*;
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::sync::Arc;
+use std::{collections::BTreeMap, convert::TryFrom, num::NonZeroU32, sync::Arc};
 use thiserror::Error;
 use time::TimeProvider;
 use write_buffer::config::WriteBufferConfigFactory;
@@ -52,6 +50,9 @@ pub enum Error {
 
     #[error("error initializing write buffer {0}")]
     WriteBuffer(#[from] write_buffer::core::WriteBufferError),
+
+    #[error("Invalid number of sequencers: {0}")]
+    NumSequencers(#[from] std::num::TryFromIntError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -136,11 +137,23 @@ pub async fn command(config: Config) -> Result<()> {
     let write_buffer_factory =
         WriteBufferConfigFactory::new(Arc::clone(&time_provider), Arc::clone(&metric_registry));
 
+    let creation_config = if config.write_buffer_config.type_ == "file" {
+        let n_sequencers: u32 = sequencers.len().try_into()?;
+        let n_sequencers: NonZeroU32 = n_sequencers.try_into()?;
+
+        Some(WriteBufferCreationConfig {
+            n_sequencers,
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
     let write_buffer_cfg = WriteBufferConnection {
         type_: config.write_buffer_config.type_,
         connection: config.write_buffer_config.connection_string,
         connection_config: Default::default(),
-        creation_config: None,
+        creation_config,
     };
     let write_buffer = write_buffer_factory
         .new_config_read(
