@@ -1,0 +1,26 @@
+name: "Semantic PR and Commit Messages"
+
+on:
+  pull_request:
+
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PR_TITLE: ${{ github.event.pull_request.title }}
+
+jobs:
+  main:
+    name: Semantic PR and commit messages
+    runs-on: ubuntu-latest
+    steps:
+    - run: |
+        env | sort
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.base.sha }}
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.sha }}
+    - run: bash .github/workflows/semantic_check.sh
