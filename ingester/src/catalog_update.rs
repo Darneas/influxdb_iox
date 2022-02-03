@@ -37,7 +37,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// metadata and applied tomstones should be added in the catalog,
 /// and then the batch should be removed from the Ingester's memory
 /// NOTE: the caller of this function needs to verify the return error if any
-/// to have the right action (e.g.: to see which ones need to get re-inserted)
+/// to reinvoke it when appropriate
 pub async fn update_catalog_after_persisting(
     ingester: &IngestHandlerImpl,
     batch: &Arc<PersistingBatch>,

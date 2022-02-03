@@ -664,7 +664,6 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
         let txt = txt.unwrap();
 
         let mut processed_tombstones = vec![];
-
         for tombstone in tombstones {
             let processed_tombstone = sqlx::query_as::<_, ProcessedTombstone>(
                 r#"
