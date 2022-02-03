@@ -44,6 +44,7 @@ fn generate_grpc_types(root: &Path) -> Result<()> {
         delete_path.join("service.proto"),
         deployment_path.join("service.proto"),
         ingest_path.join("parquet_metadata.proto"),
+        ingest_path.join("query.proto"),
         management_path.join("chunk.proto"),
         management_path.join("database_rules.proto"),
         management_path.join("jobs.proto"),

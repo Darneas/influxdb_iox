@@ -3,7 +3,7 @@
 use iox_catalog::interface::{Catalog, KafkaPartition, KafkaTopic, Sequencer, SequencerId};
 use object_store::ObjectStore;
 
-use crate::data::{IngesterData, SequencerData};
+use crate::data::{IngesterData, IngesterQueryRequest, QueryResults, SequencerData};
 use db::write_buffer::metrics::{SequencerMetrics, WriteBufferIngestMetrics};
 use dml::DmlOperation;
 use futures::{stream::BoxStream, StreamExt};
@@ -37,7 +37,10 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The [`IngestHandler`] handles all ingest from kafka, persistence and queries
-pub trait IngestHandler {}
+pub trait IngestHandler {
+    /// Return results from the in-memory data that match this query
+    fn query(&self, request: IngesterQueryRequest) -> Result<QueryResults>;
+}
 
 /// Implementation of the `IngestHandler` trait to ingest from kafka and manage persistence and answer queries
 pub struct IngestHandlerImpl {
@@ -120,7 +123,11 @@ impl IngestHandlerImpl {
     }
 }
 
-impl IngestHandler for IngestHandlerImpl {}
+impl IngestHandler for IngestHandlerImpl {
+    fn query(&self, _request: IngesterQueryRequest) -> Result<QueryResults> {
+        todo!()
+    }
+}
 
 impl Drop for IngestHandlerImpl {
     fn drop(&mut self) {

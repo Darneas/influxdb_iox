@@ -1,5 +1,7 @@
 //! Flight gRPC API for interaction with the query service
 
+// TODO: move this to the query server as that's where it will be used?
+
 use crate::connection::Connection;
 use arrow_flight::{flight_service_client::FlightServiceClient, HandshakeRequest};
 use futures::{stream, StreamExt};

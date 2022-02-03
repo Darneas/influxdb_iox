@@ -7,8 +7,13 @@ use arrow_flight::{
     HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
 };
 use futures::Stream;
+use generated_types::influxdata::iox::ingest::v1 as proto;
+use observability_deps::tracing::info;
+use prost::Message;
+use snafu::{ResultExt, Snafu};
 use std::{pin::Pin, sync::Arc};
 use tonic::{Request, Response, Streaming};
+use trace::ctx::SpanContext;
 
 /// This type is responsible for managing all gRPC services exposed by
 /// `ingester`.
@@ -29,6 +34,54 @@ impl<I: IngestHandler + Send + Sync + 'static> GrpcDelegate<I> {
         FlightServer::new(FlightService {
             ingest_handler: Arc::clone(&self.ingest_handler),
         })
+    }
+}
+
+#[derive(Debug, Snafu)]
+#[allow(missing_docs)]
+pub enum Error {
+    #[snafu(display("Invalid ticket. Error: {:?} Ticket: {:?}", source, ticket))]
+    InvalidTicket {
+        source: prost::DecodeError,
+        ticket: Vec<u8>,
+    },
+
+    #[snafu(display("Invalid query, could not convert protobuf: {}", source))]
+    InvalidQuery {
+        source: generated_types::google::FieldViolation,
+    },
+
+    #[snafu(display("Error while performing query: {}", source))]
+    Query { source: crate::handler::Error },
+}
+
+impl From<Error> for tonic::Status {
+    /// Logs and converts a result from the business logic into the appropriate tonic status
+    fn from(err: Error) -> Self {
+        // An explicit match on the Error enum will ensure appropriate logging is handled for any
+        // new error variants.
+        let msg = "Error handling Flight gRPC request";
+        match err {
+            Error::InvalidTicket { .. } | Error::InvalidQuery { .. } | Error::Query { .. } => {
+                // TODO(edd): this should be `debug`. Keeping at info whilst IOx still in early
+                // development
+                info!(?err, msg)
+            }
+        }
+        err.to_status()
+    }
+}
+
+impl Error {
+    /// Converts a result from the business logic into the appropriate tonic status
+    fn to_status(&self) -> tonic::Status {
+        use tonic::Status;
+        match &self {
+            Self::InvalidTicket { .. } | Self::InvalidQuery { .. } => {
+                Status::invalid_argument(self.to_string())
+            }
+            Self::Query { .. } => Status::internal(self.to_string()),
+        }
     }
 }
 
@@ -59,9 +112,25 @@ impl<I: IngestHandler + Send + Sync + 'static> Flight for FlightService<I> {
 
     async fn do_get(
         &self,
-        _request: Request<Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, tonic::Status> {
-        Err(tonic::Status::unimplemented("Not yet implemented"))
+        let _span_ctx: Option<SpanContext> = request.extensions().get().cloned();
+        let ticket = request.into_inner();
+
+        let proto_query_request =
+            proto::IngesterQueryRequest::decode(&*ticket.ticket).context(InvalidTicketSnafu {
+                ticket: ticket.ticket,
+            })?;
+
+        let query_request = proto_query_request.try_into().context(InvalidQuerySnafu)?;
+
+        let _query_response = self
+            .ingest_handler
+            .query(query_request)
+            .context(QuerySnafu)?;
+
+        let output = futures::stream::empty();
+        Ok(Response::new(Box::pin(output) as Self::DoGetStream))
     }
 
     async fn handshake(
