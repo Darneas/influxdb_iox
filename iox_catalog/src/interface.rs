@@ -1663,6 +1663,9 @@ pub(crate) mod test_helpers {
         assert_eq!(p_tombstones.len(), 2);
         assert_eq!(t1.id, p_tombstones[0].tombstone_id);
         assert_eq!(t2.id, p_tombstones[1].tombstone_id);
+        // verify the catalog
+        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 2);
+        assert_eq!(catalog.parquet_files().count().await.unwrap(), 1);
         assert!(catalog
             .parquet_files()
             .exist(parquet_file.id)
@@ -1678,8 +1681,6 @@ pub(crate) mod test_helpers {
             .exist(parquet_file.id, t1.id)
             .await
             .unwrap());
-        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 2);
-        assert_eq!(catalog.parquet_files().count().await.unwrap(), 1);
 
         // Error due to duplicate on tombstone 1
         catalog
