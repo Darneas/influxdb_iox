@@ -1953,83 +1953,83 @@ mod tests {
 
     #[tokio::test]
     async fn test_predicate_rewrite_table_names() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             InfluxRpcPlanner::new()
                 .table_names(test_db, rpc_predicate)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_rewrite_tag_keys() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             InfluxRpcPlanner::new()
                 .tag_keys(test_db, rpc_predicate)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_rewrite_tag_values() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             InfluxRpcPlanner::new()
                 .tag_values(test_db, "foo", rpc_predicate)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_rewrite_field_columns() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             InfluxRpcPlanner::new()
                 .field_columns(test_db, rpc_predicate)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_rewrite_read_filter() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             InfluxRpcPlanner::new()
                 .read_filter(test_db, rpc_predicate)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_read_group() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             let agg = Aggregate::None;
             let group_columns = &["foo"];
             InfluxRpcPlanner::new()
                 .read_group(test_db, rpc_predicate, agg, group_columns)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     #[tokio::test]
     async fn test_predicate_read_window_aggregate() {
-        run_test(Box::new(|test_db, rpc_predicate| {
+        run_test(&|test_db, rpc_predicate| {
             let agg = Aggregate::First;
             let every = WindowDuration::from_months(1, false);
             let offset = WindowDuration::from_months(1, false);
             InfluxRpcPlanner::new()
                 .read_window_aggregate(test_db, rpc_predicate, agg, every, offset)
                 .expect("creating plan");
-        }))
+        })
         .await
     }
 
     /// Runs f() which is expected to call a gRPC planning function
     /// and checks that predicates are simplified prior to passing
     /// into chunks
-    async fn run_test(f: Box<dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send + Sync>) {
+    async fn run_test(f: &(dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send + Sync)) {
         // ------------- Test 1 ----------------
 
         // this is what happens with a grpc predicate on a tag
