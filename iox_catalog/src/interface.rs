@@ -1655,6 +1655,9 @@ pub(crate) mod test_helpers {
             to_delete: false,
         };
 
+        let parquet_file_count_before = catalog.parquet_files().count().await.unwrap();
+        let pt_count_before = catalog.processed_tombstones().count().await.unwrap();
+
         // Add parquet and processed tombstone in one transaction
         let (parquet_file, p_tombstones) = catalog
             .add_parquet_file_with_tombstones(&parquet, &[t1.clone(), t2.clone()])
@@ -1663,9 +1666,14 @@ pub(crate) mod test_helpers {
         assert_eq!(p_tombstones.len(), 2);
         assert_eq!(t1.id, p_tombstones[0].tombstone_id);
         assert_eq!(t2.id, p_tombstones[1].tombstone_id);
+
         // verify the catalog
-        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 2);
-        assert_eq!(catalog.parquet_files().count().await.unwrap(), 1);
+        let parquet_file_count_after = catalog.parquet_files().count().await.unwrap();
+        let pt_count_after = catalog.processed_tombstones().count().await.unwrap();
+        assert_eq!(pt_count_after - pt_count_before, 2);
+        assert_eq!(parquet_file_count_after - parquet_file_count_before, 1);
+        let pt_count_before = pt_count_after;
+
         assert!(catalog
             .parquet_files()
             .exist(parquet_file.id)
@@ -1706,7 +1714,10 @@ pub(crate) mod test_helpers {
             .exist(parquet_file.id, t3.id)
             .await
             .unwrap());
-        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 3);
+
+        let pt_count_after = catalog.processed_tombstones().count().await.unwrap();
+        assert_eq!(pt_count_after - pt_count_before, 1);
+        let pt_count_before = pt_count_after;
 
         // Add non-exist tombstone t4 and should fail
         let mut t4 = t3.clone();
@@ -1715,7 +1726,8 @@ pub(crate) mod test_helpers {
             .add_parquet_file_with_tombstones(&parquet, &[t4])
             .await
             .unwrap_err();
-        // Still 3 count as before
-        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 3);
+        // Still same count as before
+        let pt_count_after = catalog.processed_tombstones().count().await.unwrap();
+        assert_eq!(pt_count_after - pt_count_before, 0);
     }
 }
