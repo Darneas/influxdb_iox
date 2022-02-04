@@ -665,11 +665,53 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
         parquet_file_id: ParquetFileId,
         tombstones: &[Tombstone],
     ) -> Result<Vec<ProcessedTombstone>> {
-        if txt.is_none() {
-            return Err(Error::NoTransaction);
-        }
-        let txt = txt.unwrap();
+        // helper to process this in transaction until Marco builds a better abstraction
+        async fn create_with_txt(
+            txt: &mut Transaction<'_, Postgres>,
+            parquet_file_id: ParquetFileId,
+            tombstones: &[Tombstone],
+        ) -> Result<Vec<ProcessedTombstone>> {
+            let mut processed_tombstones = vec![];
+            for tombstone in tombstones {
+                let processed_tombstone = sqlx::query_as::<_, ProcessedTombstone>(
+                    r#"
+                        INSERT INTO processed_tombstone ( tombstone_id, parquet_file_id )
+                        VALUES ( $1, $2 )
+                        RETURNING *
+                        "#,
+                )
+                .bind(tombstone.id) // $1
+                .bind(parquet_file_id) // $2
+                .fetch_one(&mut *txt)
+                .await
+                .map_err(|e| {
+                    if is_unique_violation(&e) {
+                        Error::ProcessTombstoneExists {
+                            tombstone_id: tombstone.id.get(),
+                            parquet_file_id: parquet_file_id.get(),
+                        }
+                    } else if is_fk_violation(&e) {
+                        Error::ForeignKeyViolation { source: e }
+                    } else {
+                        Error::SqlxError { source: e }
+                    }
+                })?;
 
+                processed_tombstones.push(processed_tombstone);
+            }
+
+            Ok(processed_tombstones)
+        }
+
+        // needs to be doen in a transaction
+        if let Some(txt) = txt {
+            return create_with_txt(txt, parquet_file_id, tombstones).await;
+        }
+
+        // no transaction provided
+        // todo: we should never needs this but since right now we implement 2 catalogs,
+        // postgres (for production)  and mem (for testing only) that does not need to provide txt
+        // this will be refactor when Marco has his new abstraction done
         let mut processed_tombstones = vec![];
         for tombstone in tombstones {
             let processed_tombstone = sqlx::query_as::<_, ProcessedTombstone>(
@@ -681,7 +723,7 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
             )
             .bind(tombstone.id) // $1
             .bind(parquet_file_id) // $2
-            .fetch_one(&mut *txt)
+            .fetch_one(&self.pool)
             .await
             .map_err(|e| {
                 if is_unique_violation(&e) {
