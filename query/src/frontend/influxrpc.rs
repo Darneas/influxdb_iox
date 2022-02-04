@@ -2029,7 +2029,7 @@ mod tests {
     /// Runs f() which is expected to call a gRPC planning function
     /// and checks that predicates are simplified prior to passing
     /// into chunks
-    async fn run_test(f: Box<dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send>) {
+    async fn run_test(f: Box<dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send + Sync>) {
         // ------------- Test 1 ----------------
 
         // this is what happens with a grpc predicate on a tag
@@ -2092,7 +2092,7 @@ mod tests {
 
     /// Runs func() with the specified predicate and verifies `expected_predicate` is received by the chunk
     async fn run_test_with_predicate(
-        f: &Box<dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send>,
+        f: &(dyn Fn(&TestDatabase, InfluxRpcPredicate) + Send + Sync),
         predicate: Predicate,
         expected_predicate: Predicate,
     ) {
