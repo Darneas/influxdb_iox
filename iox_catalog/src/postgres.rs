@@ -28,6 +28,12 @@ pub struct PostgresCatalog {
     pool: Pool<Postgres>,
 }
 
+// struct to get return value from "select count(*) ..." wuery"
+#[derive(sqlx::FromRow)]
+struct Count {
+    count: i64,
+}
+
 impl PostgresCatalog {
     /// Connect to the catalog store.
     pub async fn connect(
@@ -629,24 +635,25 @@ RETURNING *
     }
 
     async fn exist(&self, id: ParquetFileId) -> Result<bool> {
-        let read_result =
-            sqlx::query_as::<_, ParquetFile>(r#"SELECT count(*) FROM parquet_file WHERE id = $1;"#)
-                .bind(&id) // $1
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|e| Error::SqlxError { source: e })?;
+        let read_result = sqlx::query_as::<_, Count>(
+            r#"SELECT count(*) as count FROM parquet_file WHERE id = $1;"#,
+        )
+        .bind(&id) // $1
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(!read_result.is_empty())
+        Ok(!read_result.count > 0)
     }
 
-    async fn count(&self) -> Result<usize> {
+    async fn count(&self) -> Result<i64> {
         let read_result =
-            sqlx::query_as::<_, ProcessedTombstone>(r#"SELECT count(*) FROM parquet_file;"#)
-                .fetch_all(&self.pool)
+            sqlx::query_as::<_, Count>(r#"SELECT count(*) as count  FROM parquet_file;"#)
+                .fetch_one(&self.pool)
                 .await
                 .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(read_result.len())
+        Ok(read_result.count)
     }
 }
 
@@ -700,25 +707,25 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
         parquet_file_id: ParquetFileId,
         tombstone_id: TombstoneId,
     ) -> Result<bool> {
-        let read_result = sqlx::query_as::<_, ProcessedTombstone>(
-            r#"SELECT count(*) FROM processed_tombstone WHERE parquet_file_id = $1 AND tombstone_id = #2;"#)
+        let read_result = sqlx::query_as::<_, Count>(
+            r#"SELECT count(*) as count FROM processed_tombstone WHERE parquet_file_id = $1 AND tombstone_id = #2;"#)
             .bind(&parquet_file_id) // $1
             .bind(&tombstone_id) // $2
-            .fetch_all(&self.pool)
+            .fetch_one(&self.pool)
             .await
             .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(!read_result.is_empty())
+        Ok(!read_result.count > 0)
     }
 
-    async fn count(&self) -> Result<usize> {
+    async fn count(&self) -> Result<i64> {
         let read_result =
-            sqlx::query_as::<_, ProcessedTombstone>(r#"SELECT count(*) FROM processed_tombstone;"#)
-                .fetch_all(&self.pool)
+            sqlx::query_as::<_, Count>(r#"SELECT count(*) as count FROM processed_tombstone;"#)
+                .fetch_one(&self.pool)
                 .await
                 .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(read_result.len())
+        Ok(read_result.count)
     }
 }
 

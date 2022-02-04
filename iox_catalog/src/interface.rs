@@ -42,6 +42,12 @@ pub enum Error {
     #[snafu(display("parquet file with object_store_id {} already exists", object_store_id))]
     FileExists { object_store_id: Uuid },
 
+    #[snafu(display("parquet file with id {} does not exist. Foreign key violation", id))]
+    FileNotFound { id: i64 },
+
+    #[snafu(display("tombstone with id {} does not exist. Foreign key violation", id))]
+    TombstoneNotFound { id: i64 },
+
     #[snafu(display("parquet_file record {} not found", id))]
     ParquetRecordNotFound { id: ParquetFileId },
 
@@ -66,6 +72,9 @@ pub enum Error {
         tombstone_id: i64,
         parquet_file_id: i64,
     },
+
+    #[snafu(display("Error while converting usize {} to i64", value))]
+    InvalidValue { value: usize },
 }
 
 /// A specialized `Error` for Catalog errors
@@ -499,7 +508,7 @@ pub trait ParquetFileRepo: Send + Sync {
     async fn exist(&self, id: ParquetFileId) -> Result<bool>;
 
     /// Return count
-    async fn count(&self) -> Result<usize>;
+    async fn count(&self) -> Result<i64>;
 }
 
 /// Functions for working with processed tombstone pointers in the catalog
@@ -521,7 +530,7 @@ pub trait ProcessedTombstoneRepo: Send + Sync {
     ) -> Result<bool>;
 
     /// Return count
-    async fn count(&self) -> Result<usize>;
+    async fn count(&self) -> Result<i64>;
 }
 
 /// Data object for a kafka topic
@@ -947,6 +956,8 @@ pub(crate) mod test_helpers {
         test_partition(Arc::clone(&catalog)).await;
         test_tombstone(Arc::clone(&catalog)).await;
         test_parquet_file(Arc::clone(&catalog)).await;
+        test_processed_tombstones(Arc::clone(&catalog)).await;
+        test_add_parquet_file_with_tombstones(Arc::clone(&catalog)).await;
     }
 
     async fn test_setup(catalog: Arc<dyn Catalog>) {
@@ -1341,6 +1352,11 @@ pub(crate) mod test_helpers {
         let max_time = Timestamp::new(10);
 
         let parquet_repo = catalog.parquet_files();
+
+        // Must have no rows
+        let row_count = parquet_repo.count().await.unwrap();
+        assert_eq!(row_count, 0);
+
         let parquet_file = parquet_repo
             .create(
                 None,
@@ -1388,6 +1404,17 @@ pub(crate) mod test_helpers {
             .await
             .unwrap();
 
+        // Must have 2 rows
+        let row_count = parquet_repo.count().await.unwrap();
+        assert_eq!(row_count, 2);
+
+        let exist_id = parquet_file.id;
+        let non_exist_id = ParquetFileId::new(other_file.id.get() + 10);
+        // make sure exists_id != non_exist_id
+        assert_ne!(exist_id, non_exist_id);
+        assert!(parquet_repo.exist(exist_id).await.unwrap());
+        assert!(!parquet_repo.exist(non_exist_id).await.unwrap());
+
         let files = parquet_repo
             .list_by_sequencer_greater_than(sequencer.id, SequenceNumber::new(1))
             .await
@@ -1407,5 +1434,277 @@ pub(crate) mod test_helpers {
             .await
             .unwrap();
         assert!(files.first().unwrap().to_delete);
+    }
+
+    async fn test_processed_tombstones(catalog: Arc<dyn Catalog>) {
+        let kafka = catalog.kafka_topics().create_or_get("foo").await.unwrap();
+        let pool = catalog.query_pools().create_or_get("foo").await.unwrap();
+        let namespace = catalog
+            .namespaces()
+            .create("namespace_parquet_file_test", "inf", kafka.id, pool.id)
+            .await
+            .unwrap();
+        let table = catalog
+            .tables()
+            .create_or_get("test_table", namespace.id)
+            .await
+            .unwrap();
+        let sequencer = catalog
+            .sequencers()
+            .create_or_get(&kafka, KafkaPartition::new(1))
+            .await
+            .unwrap();
+        let partition = catalog
+            .partitions()
+            .create_or_get("one", sequencer.id, table.id)
+            .await
+            .unwrap();
+        let min_time = Timestamp::new(1);
+        let max_time = Timestamp::new(10);
+        let parquet_file = catalog
+            .parquet_files()
+            .create(
+                None,
+                sequencer.id,
+                partition.table_id,
+                partition.id,
+                Uuid::new_v4(),
+                SequenceNumber::new(10),
+                SequenceNumber::new(140),
+                min_time,
+                max_time,
+            )
+            .await
+            .unwrap();
+        let t1 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(1),
+                min_time,
+                max_time,
+                "whatevs",
+            )
+            .await
+            .unwrap();
+        let t2 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(2),
+                min_time,
+                max_time,
+                "bleh",
+            )
+            .await
+            .unwrap();
+        let t3 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(3),
+                min_time,
+                max_time,
+                "meh",
+            )
+            .await
+            .unwrap();
+
+        // The actual test for processed tombstones
+        let processed_tombstone_repo = catalog.processed_tombstones();
+
+        // Must have no rows
+        let row_count = processed_tombstone_repo.count().await.unwrap();
+        assert_eq!(row_count, 0);
+
+        // Insert 2 rows of processed tombstones
+        let pts = processed_tombstone_repo
+            .create_many(None, parquet_file.id, &vec![t1.clone(), t2.clone()])
+            .await
+            .unwrap();
+        assert_eq!(pts.len(), 2);
+        assert_eq!(parquet_file.id, pts[0].parquet_file_id);
+        assert_eq!(t1.id, pts[0].tombstone_id);
+        assert_eq!(parquet_file.id, pts[1].parquet_file_id);
+        assert_eq!(t2.id, pts[1].tombstone_id);
+
+        // Must have 2 rows
+        let row_count = processed_tombstone_repo.count().await.unwrap();
+        assert_eq!(row_count, 2);
+
+        // Check existence
+        let non_exist_parquet_id = ParquetFileId::new(parquet_file.id.get() + 1);
+        let non_exist_tombstone_id = TombstoneId::new(t2.id.get() + 10);
+        assert!(processed_tombstone_repo
+            .exist(parquet_file.id, t1.id)
+            .await
+            .unwrap());
+        assert!(!processed_tombstone_repo
+            .exist(non_exist_parquet_id, t1.id)
+            .await
+            .unwrap());
+        assert!(!processed_tombstone_repo
+            .exist(parquet_file.id, non_exist_tombstone_id)
+            .await
+            .unwrap());
+
+        // Cannot insert due to foreign key violation
+        // parquet file not avai/alble
+        let non_exist_parquet_id = ParquetFileId::new(parquet_file.id.get() + 1);
+        let err = processed_tombstone_repo
+            .create_many(None, non_exist_parquet_id, &vec![t3.clone()])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Foreign key violation"));
+        // tombstone not availalble
+        let err = processed_tombstone_repo
+            .create_many(None, parquet_file.id, &vec![t3])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Foreign key violation"));
+    }
+
+    async fn test_add_parquet_file_with_tombstones(catalog: Arc<dyn Catalog>) {
+        let kafka = catalog.kafka_topics().create_or_get("foo").await.unwrap();
+        let pool = catalog.query_pools().create_or_get("foo").await.unwrap();
+        let namespace = catalog
+            .namespaces()
+            .create("namespace_parquet_file_test", "inf", kafka.id, pool.id)
+            .await
+            .unwrap();
+        let table = catalog
+            .tables()
+            .create_or_get("test_table", namespace.id)
+            .await
+            .unwrap();
+        let sequencer = catalog
+            .sequencers()
+            .create_or_get(&kafka, KafkaPartition::new(1))
+            .await
+            .unwrap();
+        let partition = catalog
+            .partitions()
+            .create_or_get("one", sequencer.id, table.id)
+            .await
+            .unwrap();
+
+        // Add tombstones
+        let min_time = Timestamp::new(1);
+        let max_time = Timestamp::new(10);
+        let t1 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(1),
+                min_time,
+                max_time,
+                "whatevs",
+            )
+            .await
+            .unwrap();
+        let t2 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(2),
+                min_time,
+                max_time,
+                "bleh",
+            )
+            .await
+            .unwrap();
+        let t3 = catalog
+            .tombstones()
+            .create_or_get(
+                table.id,
+                sequencer.id,
+                SequenceNumber::new(3),
+                min_time,
+                max_time,
+                "meh",
+            )
+            .await
+            .unwrap();
+
+        // Prepare metadata in form of ParquetFile to get added with tombstone
+        let parquet = ParquetFile {
+            id: ParquetFileId::new(0), //fake id that will never be used
+            sequencer_id: sequencer.id,
+            table_id: table.id,
+            partition_id: partition.id,
+            object_store_id: Uuid::new_v4(),
+            min_sequence_number: SequenceNumber::new(4),
+            max_sequence_number: SequenceNumber::new(10),
+            min_time,
+            max_time,
+            to_delete: false,
+        };
+
+        // Add parquet and processed tombstone in one transaction
+        let (parquet_file, p_tombstones) = catalog
+            .add_parquet_file_with_tombstones(&parquet, &vec![t1.clone(), t2.clone()])
+            .await
+            .unwrap();
+        assert_eq!(p_tombstones.len(), 2);
+        assert_eq!(t1.id, p_tombstones[0].tombstone_id);
+        assert_eq!(t2.id, p_tombstones[1].tombstone_id);
+        assert!(catalog
+            .parquet_files()
+            .exist(parquet_file.id)
+            .await
+            .unwrap());
+        assert!(catalog
+            .processed_tombstones()
+            .exist(parquet_file.id, t1.id)
+            .await
+            .unwrap());
+        assert!(catalog
+            .processed_tombstones()
+            .exist(parquet_file.id, t1.id)
+            .await
+            .unwrap());
+        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 2);
+        assert_eq!(catalog.parquet_files().count().await.unwrap(), 1);
+
+        // Error due to duplicate on tombstone 1
+        catalog
+            .add_parquet_file_with_tombstones(&parquet, &vec![t3.clone(), t1.clone()])
+            .await
+            .unwrap_err();
+        // Since the transaction is rollback, t3 is not yet added
+        assert!(!catalog
+            .processed_tombstones()
+            .exist(parquet_file.id, t3.id)
+            .await
+            .unwrap());
+
+        // Add only t3 this time and should go trhough
+        let (parquet_file, p_tombstones) = catalog
+            .add_parquet_file_with_tombstones(&parquet, &vec![t3.clone()])
+            .await
+            .unwrap();
+        assert_eq!(p_tombstones.len(), 1);
+        assert_eq!(t3.id, p_tombstones[0].tombstone_id);
+        assert!(catalog
+            .processed_tombstones()
+            .exist(parquet_file.id, t3.id)
+            .await
+            .unwrap());
+        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 3);
+
+        // Add non-exist tombstone t4 and should fail
+        let mut t4 = t3.clone();
+        t4.id = TombstoneId::new(t4.id.get() + 10);
+        catalog
+            .add_parquet_file_with_tombstones(&parquet, &vec![t4])
+            .await
+            .unwrap_err();
+        // Still 3 count as before
+        assert_eq!(catalog.processed_tombstones().count().await.unwrap(), 3);
     }
 }

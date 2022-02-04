@@ -560,9 +560,14 @@ impl ParquetFileRepo for MemCatalog {
         Ok(collections.parquet_files.iter().any(|f| f.id == id))
     }
 
-    async fn count(&self) -> Result<usize> {
+    async fn count(&self) -> Result<i64> {
         let collections = self.collections.lock().expect("mutex poisoned");
-        Ok(collections.parquet_files.len())
+        let count = collections.parquet_files.len();
+        let count_i64 = i64::try_from(count);
+        if let Err(_) = count_i64 {
+            return Err(Error::InvalidValue { value: count });
+        }
+        Ok(count_i64.unwrap())
     }
 }
 
@@ -576,8 +581,26 @@ impl ProcessedTombstoneRepo for MemCatalog {
     ) -> Result<Vec<ProcessedTombstone>> {
         let mut collections = self.collections.lock().expect("mutex poisoned");
 
+        // check if the parquet file available
+        if !collections
+            .parquet_files
+            .iter()
+            .any(|f| f.id == parquet_file_id)
+        {
+            return Err(Error::FileNotFound {
+                id: parquet_file_id.get(),
+            });
+        }
+
         let mut processed_tombstones = vec![];
         for tombstone in tombstones {
+            // check if tomstone exists
+            if !collections.tombstones.iter().any(|f| f.id == tombstone.id) {
+                return Err(Error::TombstoneNotFound {
+                    id: tombstone.id.get(),
+                });
+            }
+
             if collections
                 .processed_tombstones
                 .iter()
@@ -615,9 +638,14 @@ impl ProcessedTombstoneRepo for MemCatalog {
             .any(|f| f.parquet_file_id == parquet_file_id && f.tombstone_id == tombstone_id))
     }
 
-    async fn count(&self) -> Result<usize> {
+    async fn count(&self) -> Result<i64> {
         let collections = self.collections.lock().expect("mutex poisoned");
-        Ok(collections.processed_tombstones.len())
+        let count = collections.processed_tombstones.len();
+        let count_i64 = i64::try_from(count);
+        if let Err(_) = count_i64 {
+            return Err(Error::InvalidValue { value: count });
+        }
+        Ok(count_i64.unwrap())
     }
 }
 
