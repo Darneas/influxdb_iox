@@ -93,6 +93,18 @@ pub struct Config {
         env = "INFLUXDB_IOX_WRITE_BUFFER_PARTITION_RANGE_END"
     )]
     pub write_buffer_partition_range_end: i32,
+
+    #[clap(
+        long = "--pause-ingest-size-bytes",
+        env = "INFLUXDB_IOX_PAUSE_INGEST_SIZE_BYTES"
+    )]
+    pub pause_ingest_size_bytes: usize,
+
+    #[clap(
+        long = "--persist-memory-threshold-bytes",
+        env = "INFLUXDB_IOX_PERSIST_MEMORY_THRESHOLD_BYTES"
+    )]
+    pub persist_memory_threshold_bytes: usize,
 }
 
 pub async fn command(config: Config) -> Result<()> {
@@ -151,6 +163,8 @@ pub async fn command(config: Config) -> Result<()> {
         .await?;
 
     let ingest_handler = Arc::new(IngestHandlerImpl::new(
+        config.pause_ingest_size_bytes,
+        config.persist_memory_threshold_bytes,
         kafka_topic,
         sequencers,
         catalog,

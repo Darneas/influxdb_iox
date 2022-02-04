@@ -3,7 +3,11 @@
 use iox_catalog::interface::{Catalog, KafkaPartition, KafkaTopic, Sequencer, SequencerId};
 use object_store::ObjectStore;
 
-use crate::data::{IngesterData, SequencerData};
+use crate::lifecycle::{DEFAULT_AGE_THRESHOLD, DEFAULT_PARTITION_SIZE_THRESHOLD};
+use crate::{
+    data::{IngesterData, SequencerData},
+    lifecycle::{run_lifecycle_manager, LifecycleManager},
+};
 use db::write_buffer::metrics::{SequencerMetrics, WriteBufferIngestMetrics};
 use dml::DmlOperation;
 use futures::{stream::BoxStream, StreamExt};
@@ -50,6 +54,8 @@ pub struct IngestHandlerImpl {
     /// The cache and buffered data for the ingester
     #[allow(dead_code)]
     data: Arc<IngesterData>,
+    ///
+    lifecycle_manager: Arc<LifecycleManager>,
 }
 
 impl std::fmt::Debug for IngestHandlerImpl {
@@ -60,7 +66,10 @@ impl std::fmt::Debug for IngestHandlerImpl {
 
 impl IngestHandlerImpl {
     /// Initialize the Ingester
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        pause_ingest_size: usize,
+        persist_memory_threshold: usize,
         topic: KafkaTopic,
         mut sequencer_states: BTreeMap<KafkaPartition, Sequencer>,
         catalog: Arc<dyn Catalog>,
@@ -83,8 +92,9 @@ impl IngestHandlerImpl {
         let kafka_topic_name = topic.name.clone();
         let ingest_metrics = WriteBufferIngestMetrics::new(registry, &topic.name);
 
+        // start the tasks to ingest from each sequencer
         let write_buffer: &'static mut _ = Box::leak(write_buffer);
-        let join_handles: Vec<_> = write_buffer
+        let mut join_handles: Vec<_> = write_buffer
             .streams()
             .into_iter()
             .filter_map(|(kafka_partition_id, stream)| {
@@ -112,10 +122,25 @@ impl IngestHandlerImpl {
             })
             .collect();
 
+        // start the lifecycle manager
+        let persister = Arc::clone(&data);
+        let lifecycle_manager = Arc::new(LifecycleManager::new(
+            pause_ingest_size,
+            persist_memory_threshold,
+            DEFAULT_PARTITION_SIZE_THRESHOLD,
+            DEFAULT_AGE_THRESHOLD,
+        ));
+        let manager = Arc::clone(&lifecycle_manager);
+        let handle = tokio::task::spawn(async move {
+            run_lifecycle_manager(manager, persister).await;
+        });
+        join_handles.push(handle);
+
         Self {
             data,
             kafka_topic: topic,
             join_handles,
+            lifecycle_manager,
         }
     }
 }
@@ -295,6 +320,8 @@ mod tests {
         let metrics: Arc<metric::Registry> = Default::default();
 
         let ingester = IngestHandlerImpl::new(
+            1000000,
+            1000,
             kafka_topic,
             sequencer_states,
             Arc::new(catalog),
