@@ -620,10 +620,15 @@ impl ProcessedTombstoneRepo for MemCatalog {
             processed_tombstones.push(processed_tombstone);
         }
 
+        // save for returning
+        let return_processed_tombstones = processed_tombstones.clone();
+
+        // Add to the catalog
         collections
             .processed_tombstones
             .append(&mut processed_tombstones);
-        Ok(processed_tombstones)
+
+        Ok(return_processed_tombstones)
     }
 
     async fn exist(
