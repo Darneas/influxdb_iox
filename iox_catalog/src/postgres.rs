@@ -755,7 +755,7 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
         tombstone_id: TombstoneId,
     ) -> Result<bool> {
         let read_result = sqlx::query_as::<_, Count>(
-            r#"SELECT count(*) as count FROM processed_tombstone WHERE parquet_file_id = $1 AND tombstone_id = #2;"#)
+            r#"SELECT count(*) as count FROM processed_tombstone WHERE parquet_file_id = $1 AND tombstone_id = $2;"#)
             .bind(&parquet_file_id) // $1
             .bind(&tombstone_id) // $2
             .fetch_one(&self.pool)
