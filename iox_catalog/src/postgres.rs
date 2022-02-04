@@ -828,6 +828,10 @@ mod tests {
     }
 
     async fn clear_schema(pool: &Pool<Postgres>) {
+        sqlx::query("delete from processed_tombstone;")
+            .execute(pool)
+            .await
+            .unwrap();
         sqlx::query("delete from tombstone;")
             .execute(pool)
             .await

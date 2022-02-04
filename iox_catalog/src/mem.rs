@@ -564,7 +564,7 @@ impl ParquetFileRepo for MemCatalog {
         let collections = self.collections.lock().expect("mutex poisoned");
         let count = collections.parquet_files.len();
         let count_i64 = i64::try_from(count);
-        if let Err(_) = count_i64 {
+        if count_i64.is_err() {
             return Err(Error::InvalidValue { value: count });
         }
         Ok(count_i64.unwrap())
@@ -642,7 +642,7 @@ impl ProcessedTombstoneRepo for MemCatalog {
         let collections = self.collections.lock().expect("mutex poisoned");
         let count = collections.processed_tombstones.len();
         let count_i64 = i64::try_from(count);
-        if let Err(_) = count_i64 {
+        if count_i64.is_err() {
             return Err(Error::InvalidValue { value: count });
         }
         Ok(count_i64.unwrap())

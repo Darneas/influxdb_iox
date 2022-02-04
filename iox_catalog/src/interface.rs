@@ -1522,7 +1522,7 @@ pub(crate) mod test_helpers {
 
         // Insert 2 rows of processed tombstones
         let pts = processed_tombstone_repo
-            .create_many(None, parquet_file.id, &vec![t1.clone(), t2.clone()])
+            .create_many(None, parquet_file.id, &[t1.clone(), t2.clone()])
             .await
             .unwrap();
         assert_eq!(pts.len(), 2);
@@ -1555,13 +1555,13 @@ pub(crate) mod test_helpers {
         // parquet file not avai/alble
         let non_exist_parquet_id = ParquetFileId::new(parquet_file.id.get() + 1);
         let err = processed_tombstone_repo
-            .create_many(None, non_exist_parquet_id, &vec![t3.clone()])
+            .create_many(None, non_exist_parquet_id, &[t3.clone()])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Foreign key violation"));
         // tombstone not availalble
         let err = processed_tombstone_repo
-            .create_many(None, parquet_file.id, &vec![t3])
+            .create_many(None, parquet_file.id, &[t3])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Foreign key violation"));
@@ -1647,7 +1647,7 @@ pub(crate) mod test_helpers {
 
         // Add parquet and processed tombstone in one transaction
         let (parquet_file, p_tombstones) = catalog
-            .add_parquet_file_with_tombstones(&parquet, &vec![t1.clone(), t2.clone()])
+            .add_parquet_file_with_tombstones(&parquet, &[t1.clone(), t2.clone()])
             .await
             .unwrap();
         assert_eq!(p_tombstones.len(), 2);
@@ -1673,7 +1673,7 @@ pub(crate) mod test_helpers {
 
         // Error due to duplicate on tombstone 1
         catalog
-            .add_parquet_file_with_tombstones(&parquet, &vec![t3.clone(), t1.clone()])
+            .add_parquet_file_with_tombstones(&parquet, &[t3.clone(), t1.clone()])
             .await
             .unwrap_err();
         // Since the transaction is rollback, t3 is not yet added
@@ -1685,7 +1685,7 @@ pub(crate) mod test_helpers {
 
         // Add only t3 this time and should go trhough
         let (parquet_file, p_tombstones) = catalog
-            .add_parquet_file_with_tombstones(&parquet, &vec![t3.clone()])
+            .add_parquet_file_with_tombstones(&parquet, &[t3.clone()])
             .await
             .unwrap();
         assert_eq!(p_tombstones.len(), 1);
@@ -1701,7 +1701,7 @@ pub(crate) mod test_helpers {
         let mut t4 = t3.clone();
         t4.id = TombstoneId::new(t4.id.get() + 10);
         catalog
-            .add_parquet_file_with_tombstones(&parquet, &vec![t4])
+            .add_parquet_file_with_tombstones(&parquet, &[t4])
             .await
             .unwrap_err();
         // Still 3 count as before
