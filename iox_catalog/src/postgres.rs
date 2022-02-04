@@ -643,7 +643,7 @@ RETURNING *
         .await
         .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(!read_result.count > 0)
+        Ok(read_result.count > 0)
     }
 
     async fn count(&self) -> Result<i64> {
@@ -715,7 +715,7 @@ impl ProcessedTombstoneRepo for PostgresCatalog {
             .await
             .map_err(|e| Error::SqlxError { source: e })?;
 
-        Ok(!read_result.count > 0)
+        Ok(read_result.count > 0)
     }
 
     async fn count(&self) -> Result<i64> {
