@@ -1577,7 +1577,12 @@ pub(crate) mod test_helpers {
         let pool = catalog.query_pools().create_or_get("foo").await.unwrap();
         let namespace = catalog
             .namespaces()
-            .create("namespace_parquet_file_test", "inf", kafka.id, pool.id)
+            .create(
+                "namespace_parquet_file_with_tombstones_test",
+                "inf",
+                kafka.id,
+                pool.id,
+            )
             .await
             .unwrap();
         let table = catalog
