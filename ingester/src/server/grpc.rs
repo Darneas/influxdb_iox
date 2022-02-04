@@ -7,7 +7,7 @@ use arrow_flight::{
     HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
 };
 use futures::Stream;
-use generated_types::influxdata::iox::ingest::v1 as proto;
+use generated_types::influxdata::iox::ingester::v1 as proto;
 use observability_deps::tracing::info;
 use prost::Message;
 use snafu::{ResultExt, Snafu};

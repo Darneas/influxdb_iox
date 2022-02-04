@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{format::StrftimeItems, TimeZone, Utc};
 use data_types::delete_predicate::DeletePredicate;
 use dml::DmlOperation;
-use generated_types::{google::FieldViolation, influxdata::iox::ingest::v1 as proto};
+use generated_types::{google::FieldViolation, influxdata::iox::ingester::v1 as proto};
 use iox_catalog::interface::{
     Catalog, KafkaPartition, NamespaceId, PartitionId, SequenceNumber, SequencerId, TableId,
     Timestamp, Tombstone,
