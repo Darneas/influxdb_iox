@@ -3,13 +3,13 @@
 use crate::interface::{
     Catalog, Column, ColumnRepo, ColumnType, Error, KafkaPartition, KafkaTopic, KafkaTopicId,
     KafkaTopicRepo, Namespace, NamespaceId, NamespaceRepo, ParquetFile, ParquetFileId,
-    ParquetFileRepo, Partition, PartitionId, PartitionRepo, QueryPool, QueryPoolId, QueryPoolRepo,
-    Result, SequenceNumber, Sequencer, SequencerId, SequencerRepo, Table, TableId, TableRepo,
-    Timestamp, Tombstone, TombstoneRepo,
+    ParquetFileRepo, Partition, PartitionId, PartitionInfo, PartitionRepo, QueryPool, QueryPoolId,
+    QueryPoolRepo, Result, SequenceNumber, Sequencer, SequencerId, SequencerRepo, Table, TableId,
+    TableRepo, Timestamp, Tombstone, TombstoneRepo,
 };
 use async_trait::async_trait;
 use observability_deps::tracing::info;
-use sqlx::{migrate::Migrator, postgres::PgPoolOptions, Executor, Pool, Postgres};
+use sqlx::{migrate::Migrator, postgres::PgPoolOptions, Executor, Pool, Postgres, Row};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -436,6 +436,40 @@ impl PartitionRepo for PostgresCatalog {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| Error::SqlxError { source: e })
+    }
+
+    async fn partition_info_by_id(
+        &self,
+        partition_id: PartitionId,
+    ) -> Result<Option<PartitionInfo>> {
+        let info = sqlx::query(
+            r#"
+        SELECT namespace.name as namespace_name, table_name.name as table_name, partition.id,
+               partition.sequencer_id, partition.table_id, partition.partition_key
+        FROM partition
+        INNER JOIN table_name on table_name.id = partition.table_id
+        INNER JOIN namespace on namespace.id = table_name.namespace_id
+        WHERE partition.id = $1;"#,
+        )
+        .bind(&partition_id) // $1
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::SqlxError { source: e })?;
+
+        let namespace_name = info.get("namespace_name");
+        let table_name = info.get("table_name");
+        let partition = Partition {
+            id: info.get("id"),
+            sequencer_id: info.get("sequencer_id"),
+            table_id: info.get("table_id"),
+            partition_key: info.get("partition_key"),
+        };
+
+        Ok(Some(PartitionInfo {
+            namespace_name,
+            table_name,
+            partition,
+        }))
     }
 }
 
